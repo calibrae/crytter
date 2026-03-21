@@ -12,15 +12,13 @@ pub struct Terminal {
     grid: GridTerminal,
     parser: Parser,
     renderer: Option<Renderer>,
-    on_data: Option<js_sys::Function>,
     on_title: Option<js_sys::Function>,
+    /// Dirty flag — set when grid changes, cleared after render.
+    dirty: bool,
 }
 
 #[wasm_bindgen]
 impl Terminal {
-    /// Create a new terminal instance.
-    /// Options: `cols` (default 80), `rows` (default 24),
-    /// `fontFamily`, `fontSize`, `theme`.
     #[wasm_bindgen(constructor)]
     pub fn new(options: Option<js_sys::Object>) -> Self {
         let (cols, rows, _font_family, _font_size) = parse_options(&options);
@@ -29,15 +27,13 @@ impl Terminal {
             grid: GridTerminal::new(cols, rows),
             parser: Parser::new(),
             renderer: None,
-            on_data: None,
             on_title: None,
+            dirty: false,
         }
     }
 
     /// Mount the terminal into a DOM container element.
-    /// Creates a canvas and starts rendering. Can only be called once.
     pub fn open(&mut self, container: web_sys::HtmlElement) {
-        // Prevent double-open leaking canvas elements
         if self.renderer.is_some() {
             return;
         }
@@ -49,7 +45,6 @@ impl Terminal {
             .dyn_into::<HtmlCanvasElement>()
             .unwrap();
 
-        // Style canvas to fill container
         let style = canvas.style();
         style.set_property("width", "100%").unwrap();
         style.set_property("height", "100%").unwrap();
@@ -57,7 +52,6 @@ impl Terminal {
 
         container.append_child(&canvas).unwrap();
 
-        // Make container focusable for keyboard events
         container.set_tab_index(0);
         let container_style = container.style();
         container_style.set_property("outline", "none").unwrap();
@@ -69,23 +63,19 @@ impl Terminal {
             Theme::default(),
         );
 
-        // Auto-fit to canvas size
         let (cols, rows) = renderer.measure_grid();
         self.grid.resize(cols, rows);
         self.renderer = Some(renderer);
-
-        // Initial render
-        self.render();
+        self.dirty = true;
     }
 
-    /// Write PTY output data to the terminal.
-    /// Accepts a string or Uint8Array from JavaScript.
+    /// Write PTY output data to the terminal. Does NOT render —
+    /// call `render()` from a rAF callback to batch multiple writes.
     pub fn write(&mut self, data: &str) {
         let actions = self.parser.parse(data.as_bytes());
         let old_title = self.grid.title().to_string();
         self.grid.process(&actions);
 
-        // Fire title change callback
         if self.grid.title() != old_title {
             if let Some(ref cb) = self.on_title {
                 let title = JsValue::from_str(self.grid.title());
@@ -93,7 +83,7 @@ impl Terminal {
             }
         }
 
-        self.render();
+        self.dirty = true;
     }
 
     /// Write raw bytes to the terminal.
@@ -110,14 +100,7 @@ impl Terminal {
             }
         }
 
-        self.render();
-    }
-
-    /// Register a callback for user input data.
-    /// The callback receives a string of escape sequence bytes.
-    #[wasm_bindgen(js_name = "onData")]
-    pub fn on_data(&mut self, callback: js_sys::Function) {
-        self.on_data = Some(callback);
+        self.dirty = true;
     }
 
     /// Register a callback for title changes.
@@ -126,13 +109,10 @@ impl Terminal {
         self.on_title = Some(callback);
     }
 
-    /// Handle a keyboard event. Returns the escape sequence string if the
-    /// key was handled, or null if it should be ignored.
-    /// The caller is responsible for forwarding the data (avoids re-entrant borrow).
+    /// Handle a keyboard event. Returns escape sequence or null.
     #[wasm_bindgen(js_name = "handleKeyEvent")]
     pub fn handle_key_event(&self, event: &web_sys::KeyboardEvent) -> Option<String> {
         let key = event.key();
-        // Don't intercept Meta (Cmd on Mac) — let browser handle Cmd+C/V/etc.
         let ctrl = event.ctrl_key();
         let alt = event.alt_key();
         let shift = event.shift_key();
@@ -147,47 +127,61 @@ impl Terminal {
             .map(|bytes| bytes.iter().map(|&b| char::from(b)).collect())
     }
 
-    /// Resize the terminal to fit its container.
+    /// Render if dirty. Call this from requestAnimationFrame.
+    /// Returns true if a frame was actually drawn.
+    pub fn render(&mut self) -> bool {
+        if !self.dirty {
+            return false;
+        }
+        self.dirty = false;
+
+        if let Some(ref mut renderer) = self.renderer {
+            renderer.scroll_to_bottom();
+            renderer.draw(&self.grid);
+        }
+        true
+    }
+
+    /// Whether the terminal has pending changes to render.
+    #[wasm_bindgen(getter, js_name = "needsRender")]
+    pub fn needs_render(&self) -> bool {
+        self.dirty
+    }
+
     pub fn fit(&mut self) {
         if let Some(ref renderer) = self.renderer {
             let (cols, rows) = renderer.measure_grid();
             if cols != self.grid.cols() || rows != self.grid.rows() {
                 self.grid.resize(cols, rows);
-                self.render();
+                self.dirty = true;
             }
         }
     }
 
-    /// Get current number of columns.
     #[wasm_bindgen(getter)]
     pub fn cols(&self) -> usize {
         self.grid.cols()
     }
 
-    /// Get current number of rows.
     #[wasm_bindgen(getter)]
     pub fn rows(&self) -> usize {
         self.grid.rows()
     }
 
-    /// Force a full redraw.
     pub fn refresh(&mut self) {
-        self.render();
+        self.dirty = true;
     }
 
-    /// Resize to specific dimensions.
     pub fn resize(&mut self, cols: usize, rows: usize) {
         self.grid.resize(cols, rows);
-        self.render();
+        self.dirty = true;
     }
 
-    /// Reset the terminal.
     pub fn reset(&mut self) {
         self.grid.reset();
-        self.render();
+        self.dirty = true;
     }
 
-    /// Scroll up by `lines` lines into scrollback.
     #[wasm_bindgen(js_name = "scrollUp")]
     pub fn scroll_up(&mut self, lines: usize) {
         if let Some(ref mut renderer) = self.renderer {
@@ -197,7 +191,6 @@ impl Terminal {
         }
     }
 
-    /// Scroll down by `lines` lines (towards live view).
     #[wasm_bindgen(js_name = "scrollDown")]
     pub fn scroll_down(&mut self, lines: usize) {
         if let Some(ref mut renderer) = self.renderer {
@@ -206,7 +199,6 @@ impl Terminal {
         }
     }
 
-    /// Snap scroll to bottom (live view).
     #[wasm_bindgen(js_name = "scrollToBottom")]
     pub fn scroll_to_bottom(&mut self) {
         if let Some(ref mut renderer) = self.renderer {
@@ -215,21 +207,12 @@ impl Terminal {
         }
     }
 
-    /// Whether currently scrolled into scrollback.
     #[wasm_bindgen(getter, js_name = "isScrolled")]
     pub fn is_scrolled(&self) -> bool {
         self.renderer
             .as_ref()
             .map(|r| r.scroll_offset() > 0)
             .unwrap_or(false)
-    }
-
-    fn render(&mut self) {
-        if let Some(ref mut renderer) = self.renderer {
-            // New output snaps to bottom
-            renderer.scroll_to_bottom();
-            renderer.draw(&self.grid);
-        }
     }
 }
 

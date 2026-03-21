@@ -57,6 +57,31 @@ pub fn color_to_css(color: Color, default_color: &str) -> String {
     }
 }
 
+/// Pre-computed CSS strings for the 256 indexed colors.
+/// Avoids repeated format! allocations during rendering.
+pub struct ColorCache {
+    indexed: [String; 256],
+}
+
+impl ColorCache {
+    pub fn new() -> Self {
+        let indexed = std::array::from_fn(|i| {
+            let (r, g, b) = indexed_to_rgb(i as u8);
+            format!("rgb({r},{g},{b})")
+        });
+        Self { indexed }
+    }
+
+    /// Look up a color, returning a &str. No allocation for indexed colors.
+    pub fn resolve<'a>(&'a self, color: Color, default: &'a str) -> std::borrow::Cow<'a, str> {
+        match color {
+            Color::Default => std::borrow::Cow::Borrowed(default),
+            Color::Indexed(idx) => std::borrow::Cow::Borrowed(&self.indexed[idx as usize]),
+            Color::Rgb(r, g, b) => std::borrow::Cow::Owned(format!("rgb({r},{g},{b})")),
+        }
+    }
+}
+
 /// Theme colors for the terminal.
 #[derive(Debug, Clone)]
 pub struct Theme {

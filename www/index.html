@@ -50,6 +50,13 @@
       const term = new Terminal();
       term.open(container);
 
+      // rAF render loop — coalesces all writes into one draw per frame
+      function renderLoop() {
+        term.render();
+        requestAnimationFrame(renderLoop);
+      }
+      requestAnimationFrame(renderLoop);
+
       document.getElementById('term-info').textContent =
         `${term.cols}×${term.rows}`;
 

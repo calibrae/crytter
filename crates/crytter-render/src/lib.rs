@@ -5,5 +5,5 @@
 pub mod palette;
 mod renderer;
 
-pub use palette::Theme;
+pub use palette::{ColorCache, Theme};
 pub use renderer::Renderer;
