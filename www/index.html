@@ -87,6 +87,8 @@
         if (!authenticated) {
           if (data === 'auth:ok') {
             authenticated = true;
+            // Send initial terminal size to hermytt
+            ws.send(JSON.stringify({ resize: [term.cols, term.rows] }));
             document.getElementById('term-info').textContent =
               `${term.cols}×${term.rows} · connected`;
             return;
@@ -131,12 +133,16 @@
         }
       }, { passive: false });
 
-      // Fit on resize
-      window.addEventListener('resize', () => {
+      // Fit on resize — send resize to hermytt
+      function sendResize() {
         term.fit();
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ resize: [term.cols, term.rows] }));
+        }
         document.getElementById('term-info').textContent =
           `${term.cols}×${term.rows} · ${ws.readyState === WebSocket.OPEN ? 'connected' : 'disconnected'}`;
-      });
+      }
+      window.addEventListener('resize', sendResize);
     }
 
     main().catch(console.error);
