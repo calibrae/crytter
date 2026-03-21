@@ -50,7 +50,7 @@
       const term = new Terminal();
       term.open(container);
 
-      // rAF render loop — coalesces all writes into one draw per frame
+      // rAF render loop
       function renderLoop() {
         term.render();
         requestAnimationFrame(renderLoop);
@@ -66,19 +66,31 @@
         document.title = title;
       });
 
-      // Connect to hermytt WebSocket PTY server.
-      // Default: same host, port 7777. Override with ?ws=<url>&token=<token>
+      // Config from URL params
       const params = new URLSearchParams(location.search);
       const wsHost = params.get('host') || location.hostname;
       const wsPort = params.get('port') || '7777';
       const token = params.get('token') || 'hermytt-test-token';
-      const wsUrl = `ws://${wsHost}:${wsPort}/ws?token=${encodeURIComponent(token)}`;
 
-      let ws = new WebSocket(wsUrl);
+      // Create a fresh session, then connect WebSocket to it
+      let sessionId = null;
+      try {
+        const resp = await fetch(`http://${wsHost}:${wsPort}/session`, {
+          method: 'POST',
+          headers: { 'X-Hermytt-Key': token },
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          sessionId = data.id;
+        }
+      } catch {}
+
+      const wsPath = sessionId ? `/ws/${sessionId}` : '/ws';
+      const ws = new WebSocket(`ws://${wsHost}:${wsPort}${wsPath}`);
       let authenticated = false;
 
       ws.onopen = () => {
-        // hermytt expects token as first message
+        // First-message auth
         ws.send(token);
       };
 
@@ -87,7 +99,6 @@
         if (!authenticated) {
           if (data === 'auth:ok') {
             authenticated = true;
-            // Send initial terminal size to hermytt
             ws.send(JSON.stringify({ resize: [term.cols, term.rows] }));
             document.getElementById('term-info').textContent =
               `${term.cols}×${term.rows} · connected`;
@@ -95,7 +106,6 @@
           }
         }
         const response = term.write(data);
-        // Send terminal query responses back to PTY (DA1, CPR, etc.)
         if (response && ws.readyState === WebSocket.OPEN) {
           ws.send(response);
         }
@@ -108,7 +118,7 @@
       };
 
       ws.onerror = () => {
-        term.write('\x1b[31m[connection failed — is hermytt running on ' + wsHost + ':' + wsPort + '?]\x1b[0m\r\n');
+        term.write('\x1b[31m[connection failed]\x1b[0m\r\n');
       };
 
       // Keyboard
@@ -122,7 +132,7 @@
         }
       });
 
-      // Scroll — mouse wheel
+      // Scroll
       container.addEventListener('wheel', (e) => {
         e.preventDefault();
         const lines = Math.max(1, Math.round(Math.abs(e.deltaY) / 20));
@@ -133,7 +143,7 @@
         }
       }, { passive: false });
 
-      // Fit on resize — send resize to hermytt
+      // Resize
       function sendResize() {
         term.fit();
         if (ws.readyState === WebSocket.OPEN) {
