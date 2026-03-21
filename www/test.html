@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>crytter test harness</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #1e1e1e; }
+    #terminal-container {
+      width: 800px;
+      height: 400px;
+      cursor: text;
+    }
+  </style>
+</head>
+<body>
+  <div id="terminal-container"></div>
+
+  <script type="module">
+    import init, { Terminal } from '/pkg/crytter_wasm.js';
+
+    async function setup() {
+      await init();
+
+      const container = document.getElementById('terminal-container');
+      const term = new Terminal();
+      term.open(container);
+
+      // rAF render loop
+      function renderLoop() {
+        term.render();
+        requestAnimationFrame(renderLoop);
+      }
+      requestAnimationFrame(renderLoop);
+
+      // Expose to Playwright
+      window.__term = term;
+      window.__ready = true;
+    }
+
+    setup().catch((e) => {
+      window.__error = e.message;
+    });
+  </script>
+</body>
+</html>
