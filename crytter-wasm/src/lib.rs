@@ -13,17 +13,18 @@ pub struct Terminal {
     parser: Parser,
     renderer: Option<Renderer>,
     on_title: Option<js_sys::Function>,
-    /// Dirty flag — set when grid changes, cleared after render.
     dirty: bool,
-    /// True when user has explicitly scrolled up. Prevents auto-snap to bottom.
     user_scrolled: bool,
+    cursor_visible_phase: bool,
+    font_family: String,
+    font_size: f64,
 }
 
 #[wasm_bindgen]
 impl Terminal {
     #[wasm_bindgen(constructor)]
     pub fn new(options: Option<js_sys::Object>) -> Self {
-        let (cols, rows, _font_family, _font_size) = parse_options(&options);
+        let (cols, rows, font_family, font_size) = parse_options(&options);
 
         Self {
             grid: GridTerminal::new(cols, rows),
@@ -32,6 +33,9 @@ impl Terminal {
             on_title: None,
             dirty: false,
             user_scrolled: false,
+            cursor_visible_phase: true,
+            font_family,
+            font_size,
         }
     }
 
@@ -61,8 +65,8 @@ impl Terminal {
 
         let mut renderer = Renderer::new(
             canvas,
-            "Menlo, Monaco, 'Courier New', monospace",
-            14.0,
+            &self.font_family,
+            self.font_size,
             Theme::default(),
         );
 
@@ -144,9 +148,13 @@ impl Terminal {
         let result = encode_key(&key, ctrl, alt, shift, app_cursor)
             .map(|bytes| bytes.iter().map(|&b| char::from(b)).collect());
 
-        // User is typing — snap to live view
-        if result.is_some() && self.user_scrolled {
-            self.scroll_to_bottom();
+        if result.is_some() {
+            // User is typing — snap to live view and show cursor
+            if self.user_scrolled {
+                self.scroll_to_bottom();
+            }
+            self.cursor_visible_phase = true;
+            self.dirty = true;
         }
 
         result
@@ -161,11 +169,10 @@ impl Terminal {
         self.dirty = false;
 
         if let Some(ref mut renderer) = self.renderer {
-            // Only snap to bottom if user hasn't explicitly scrolled
             if !self.user_scrolled {
                 renderer.scroll_to_bottom();
             }
-            renderer.draw(&self.grid);
+            renderer.draw_with_cursor(&self.grid, self.cursor_visible_phase);
         }
         true
     }
@@ -199,6 +206,15 @@ impl Terminal {
 
     pub fn refresh(&mut self) {
         self.dirty = true;
+    }
+
+    /// Toggle cursor blink phase. Call from a JS setInterval(~530ms).
+    #[wasm_bindgen(js_name = "blinkCursor")]
+    pub fn blink_cursor(&mut self) {
+        if self.grid.cursor().blinking {
+            self.cursor_visible_phase = !self.cursor_visible_phase;
+            self.dirty = true;
+        }
     }
 
     /// Dump the grid content as text lines (for debugging).

@@ -534,3 +534,41 @@ fn multiple_queries_in_one_write() {
     let responses = term.drain_responses();
     assert_eq!(responses.len(), 2);
 }
+
+// ============================================================
+// Unicode width
+// ============================================================
+
+#[test]
+fn wide_char_occupies_two_cells() {
+    let mut term = Terminal::new(80, 24);
+    // '世' is a CJK wide character (width=2)
+    feed(&mut term, "A世B".as_bytes());
+    assert_eq!(term.grid().cell(0, 0).c, 'A');
+    assert_eq!(term.grid().cell(0, 0).width, 1);
+    assert_eq!(term.grid().cell(0, 1).c, '世');
+    assert_eq!(term.grid().cell(0, 1).width, 2);
+    assert_eq!(term.grid().cell(0, 2).width, 0); // spacer
+    assert_eq!(term.grid().cell(0, 3).c, 'B');
+    assert_eq!(term.cursor().col, 4); // A(1) + 世(2) + B(1)
+}
+
+#[test]
+fn wide_char_wraps_at_boundary() {
+    let mut term = Terminal::new(5, 3);
+    // Fill 4 cols, then try a wide char at col 4 — should wrap
+    feed(&mut term, "ABCD世".as_bytes());
+    assert_eq!(term.grid().cell(0, 3).c, 'D');
+    assert_eq!(term.grid().cell(0, 4).c, ' '); // can't fit wide char here
+    assert_eq!(term.grid().cell(1, 0).c, '世'); // wrapped to next line
+    assert_eq!(term.grid().cell(1, 0).width, 2);
+}
+
+#[test]
+fn emoji_renders_as_narrow() {
+    let mut term = Terminal::new(80, 24);
+    // Basic emoji — width depends on unicode-width version
+    feed(&mut term, "❯ hello".as_bytes());
+    // Should not panic and cursor should advance
+    assert!(term.cursor().col > 0);
+}

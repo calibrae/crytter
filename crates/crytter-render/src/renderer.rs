@@ -123,7 +123,12 @@ impl Renderer {
     }
 
     /// Full render of the terminal grid with scrollback support.
+    /// `cursor_phase` controls blink — true=visible, false=hidden.
     pub fn draw(&mut self, terminal: &Terminal) {
+        self.draw_with_cursor(terminal, true);
+    }
+
+    pub fn draw_with_cursor(&mut self, terminal: &Terminal, cursor_phase: bool) {
         let grid = terminal.grid();
         let cursor = terminal.cursor();
         let rows = grid.rows();
@@ -151,7 +156,7 @@ impl Renderer {
                 }
             }
 
-            if cursor.visible {
+            if cursor.visible && cursor_phase {
                 self.draw_cursor(cursor);
             }
         } else {
@@ -192,8 +197,18 @@ impl Renderer {
         cur_font: &mut u8,
         cur_fill: &mut String,
     ) {
+        // Skip spacer cells (second half of wide chars)
+        if cell.width == 0 {
+            return;
+        }
+
         let x = col as f64 * self.cell_width;
         let y = row as f64 * self.cell_height;
+        let draw_width = if cell.width == 2 {
+            self.cell_width * 2.0
+        } else {
+            self.cell_width
+        };
 
         let (fg, bg) = if cell.attr.inverse {
             (cell.attr.bg, cell.attr.fg)
@@ -205,8 +220,7 @@ impl Renderer {
         let bg_css = self.colors.resolve(bg, &self.theme.background);
         if bg_css.as_ref() != &self.theme.background {
             self.ctx.set_fill_style_str(&bg_css);
-            self.ctx.fill_rect(x, y, self.cell_width, self.cell_height);
-            // Mark fill as bg color so we know to reset for text
+            self.ctx.fill_rect(x, y, draw_width, self.cell_height);
             *cur_fill = String::new();
         }
 

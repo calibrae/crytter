@@ -23,6 +23,8 @@ pub struct Cursor {
     pub row: usize,
     /// Current text attributes applied to new characters.
     pub attr: Attr,
+    /// Whether the cursor should blink (DECSCUSR odd=blink, even=steady).
+    pub blinking: bool,
     /// Cursor shape.
     pub shape: CursorShape,
     /// Whether the cursor is visible.
@@ -46,6 +48,7 @@ impl Default for Cursor {
             attr: Attr::default(),
             shape: CursorShape::default(),
             visible: true,
+            blinking: true,
             saved: None,
         }
     }

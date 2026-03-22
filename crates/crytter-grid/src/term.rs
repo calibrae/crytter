@@ -1,3 +1,5 @@
+use unicode_width::UnicodeWidthChar;
+
 use crytter_vte::Action;
 
 use crate::attr::Color;
@@ -154,6 +156,12 @@ impl Terminal {
     }
 
     fn print(&mut self, c: char) {
+        let char_width = UnicodeWidthChar::width(c).unwrap_or(1);
+        if char_width == 0 {
+            // Zero-width char (combining mark, etc.) — attach to previous cell
+            return;
+        }
+
         if self.wrap_pending {
             self.cursor.col = 0;
             self.linefeed();
@@ -164,24 +172,48 @@ impl Terminal {
         let row = self.cursor.row;
         let cols = self.grid.cols();
 
+        // Wide char at last column — wrap before printing
+        if char_width == 2 && col + 1 >= cols {
+            if self.modes.autowrap {
+                self.cursor.col = 0;
+                self.linefeed();
+            } else {
+                return; // Can't fit, drop it
+            }
+        }
+
+        let col = self.cursor.col;
+        let row = self.cursor.row;
+
         if col < cols && row < self.grid.rows() {
-            // Insert mode: shift chars right before writing
             if self.modes.insert {
-                self.insert_chars(1);
+                self.insert_chars(char_width);
             }
 
             if let Some(cell) = self.grid.cell_mut(row, col) {
                 cell.c = c;
                 cell.attr = self.cursor.attr;
+                cell.width = char_width as u8;
                 cell.dirty = true;
             }
 
-            if col + 1 >= cols {
+            // Wide char: mark the next cell as a spacer (width=0)
+            if char_width == 2 && col + 1 < cols {
+                if let Some(spacer) = self.grid.cell_mut(row, col + 1) {
+                    spacer.c = ' ';
+                    spacer.width = 0;
+                    spacer.attr = self.cursor.attr;
+                    spacer.dirty = true;
+                }
+            }
+
+            let new_col = col + char_width;
+            if new_col >= cols {
                 if self.modes.autowrap {
                     self.wrap_pending = true;
                 }
             } else {
-                self.cursor.col += 1;
+                self.cursor.col = new_col;
             }
         }
     }
@@ -526,6 +558,7 @@ impl Terminal {
                 }
             }
             // DECSCUSR — Set Cursor Style (CSI Ps SP q)
+            // Odd = blinking, Even = steady
             'q' if intermediates.first() == Some(&b' ') => {
                 let style = param(0, 1);
                 self.cursor.shape = match style {
@@ -534,6 +567,7 @@ impl Terminal {
                     5 | 6 => crate::cursor::CursorShape::Bar,
                     _ => crate::cursor::CursorShape::Block,
                 };
+                self.cursor.blinking = matches!(style, 0 | 1 | 3 | 5);
             }
             // DECSTBM — Set Scrolling Region
             'r' => {

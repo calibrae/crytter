@@ -57,6 +57,9 @@
       }
       requestAnimationFrame(renderLoop);
 
+      // Cursor blink timer
+      setInterval(() => term.blinkCursor(), 530);
+
       document.getElementById('term-info').textContent =
         `${term.cols}×${term.rows}`;
 

@@ -5,4 +5,5 @@ edition.workspace = true
 
 [dependencies]
 crytter-vte = { path = "../crytter-vte" }
+unicode-width = "0.2"
 log = { workspace = true }
