@@ -198,6 +198,27 @@ impl Terminal {
         self.dirty = true;
     }
 
+    /// Dump the grid content as text lines (for debugging).
+    #[wasm_bindgen(js_name = "dumpGrid")]
+    pub fn dump_grid(&self) -> String {
+        let grid = self.grid.grid();
+        let rows = self.grid.rows();
+        let cols = self.grid.cols();
+        let mut out = String::new();
+        for r in 0..rows {
+            for c in 0..cols {
+                let cell = grid.cell(r, c);
+                let ch = if cell.c == '\0' { ' ' } else { cell.c };
+                out.push(ch);
+            }
+            // Trim trailing spaces
+            let trimmed = out.trim_end();
+            out.truncate(trimmed.len());
+            out.push('\n');
+        }
+        out
+    }
+
     pub fn resize(&mut self, cols: usize, rows: usize) {
         self.grid.resize(cols, rows);
         self.dirty = true;
