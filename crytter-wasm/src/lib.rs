@@ -59,13 +59,15 @@ impl Terminal {
         let container_style = container.style();
         container_style.set_property("outline", "none").unwrap();
 
-        let renderer = Renderer::new(
+        let mut renderer = Renderer::new(
             canvas,
             "Menlo, Monaco, 'Courier New', monospace",
             14.0,
             Theme::default(),
         );
 
+        // Canvas is now in the DOM — set buffer dimensions from actual layout size
+        renderer.resize_canvas();
         let (cols, rows) = renderer.measure_grid();
         self.grid.resize(cols, rows);
         self.renderer = Some(renderer);
@@ -175,12 +177,13 @@ impl Terminal {
     }
 
     pub fn fit(&mut self) {
-        if let Some(ref renderer) = self.renderer {
+        if let Some(ref mut renderer) = self.renderer {
+            renderer.resize_canvas();
             let (cols, rows) = renderer.measure_grid();
             if cols != self.grid.cols() || rows != self.grid.rows() {
                 self.grid.resize(cols, rows);
-                self.dirty = true;
             }
+            self.dirty = true;
         }
     }
 
